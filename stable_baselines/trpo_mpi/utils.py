@@ -88,6 +88,9 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False):
         # Clip the actions to avoid out of bound error
         if isinstance(env.action_space, gym.spaces.Box):
             clipped_action = np.clip(action, env.action_space.low, env.action_space.high)
+            # for i in clipped_action:
+            #     if np.isnan(i) == True:
+            #         i = 0.0
 
         if gail:
             rew = reward_giver.get_reward(observation, clipped_action[0])

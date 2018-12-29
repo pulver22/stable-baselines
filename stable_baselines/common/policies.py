@@ -40,14 +40,16 @@ def navigation_cnn(observation, **kwargs):
     scalar = observation[:, :, -1, :]
     # navigation_info = scalar[:, 0:2, :]  # EULER: Only the first two values are important (distance and bearing)
     navigation_info = scalar[:, 0:6, :]  # QUATERNION: Only the first two values are important (distance and bearing)
+    navigation_info = navigation_info[:, :, 0]  # Reshape in order to concatenate the arrays
+    navigation_info = navigation_info * 255 # Denormalize the vector multiplying by ob_space.high
 
     activ = tf.nn.relu
     layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
     layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
     layer_3 = activ(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs))
     layer_3 = conv_to_fc(layer_3)
-    print("L3: ", np.shape(layer_3))
-    print("NI: ", np.shape(navigation_info))
+    # print("L3: ", np.shape(layer_3))
+    # print("NI: ", np.shape(navigation_info))
     layer_3 = tf.concat([layer_3, navigation_info], axis=1)
     return activ(linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2)))
 
@@ -334,7 +336,7 @@ class FeedForwardPolicy(ActorCriticPolicy):
     """
 
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
-                 act_fun=tf.tanh, cnn_extractor=nature_cnn, feature_extraction="navigation_cnn", **kwargs):
+                 act_fun=tf.tanh, cnn_extractor=nature_cnn, feature_extraction="cnn", **kwargs):
         super(FeedForwardPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, n_lstm=256,
                                                 reuse=reuse, scale=(feature_extraction == "cnn"))
 
@@ -354,7 +356,6 @@ class FeedForwardPolicy(ActorCriticPolicy):
             if feature_extraction == "cnn":
                 pi_latent = vf_latent = cnn_extractor(self.processed_obs, **kwargs)
             elif feature_extraction == "navigation_cnn":
-                print("---> HERE!!")
                 pi_latent = vf_latent = navigation_cnn(self.processed_obs, **kwargs)
             else:
                 pi_latent, vf_latent = mlp_extractor(tf.layers.flatten(self.processed_obs), net_arch, act_fun)
@@ -399,7 +400,7 @@ class CnnPolicy(FeedForwardPolicy):
 
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, **_kwargs):
         super(CnnPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse,
-                                        feature_extraction="cnn", **_kwargs)
+                                        feature_extraction="navigation_cnn", **_kwargs)
 
 
 class CnnLstmPolicy(LstmPolicy):

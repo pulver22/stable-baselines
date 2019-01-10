@@ -48,13 +48,18 @@ def navigation_cnn(observation, **kwargs):
     activ = tf.nn.relu
     layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
     layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
-    layer_3 = activ(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs))
+    layer_3 = tf.nn.sigmoid(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs)) # To squeeze values in [0,1]
     layer_3 = conv_to_fc(layer_3)
-    print("L3: ", np.shape(layer_3))
-    print("NI: ", np.shape(navigation_info))
+    #layer_3 = tf.nn.sigmoid(layer_3)  # To squeeze values in [0,1]
+    #print("L3: ", np.shape(layer_3))
+    #print("NI: ", np.shape(navigation_info))
     layer_3 = tf.concat([layer_3, navigation_info], axis=1)
-    print("L3: ", np.shape(layer_3))
-    return activ(linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2)))
+    #print("L3: ", np.shape(layer_3))
+    #layer_3 = linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2))
+    #layer_3 = tf.nn.sigmoid(layer_3)  # To squeeze values in [0,1]
+    #layer_3 = tf.concat([layer_3, navigation_info], axis=1)
+    #return activ(layer_3)
+    return activ(linear(layer_3, 'fc2', n_hidden=512, init_scale=np.sqrt(2)))
 
 
 def mlp_extractor(flat_observations, net_arch, act_fun):
@@ -339,7 +344,7 @@ class FeedForwardPolicy(ActorCriticPolicy):
     """
 
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
-                 act_fun=tf.tanh, cnn_extractor=nature_cnn, feature_extraction="cnn", **kwargs):
+                 act_fun=tf.tanh, cnn_extractor=nature_cnn, feature_extraction=None, **kwargs):
         super(FeedForwardPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, n_lstm=256,
                                                 reuse=reuse, scale=(feature_extraction == "cnn"))
 
@@ -385,6 +390,25 @@ class FeedForwardPolicy(ActorCriticPolicy):
 
     def value(self, obs, state=None, mask=None):
         return self.sess.run(self._value, {self.obs_ph: obs})
+
+class NavigationMlpPolicy(FeedForwardPolicy):
+    """
+    Policy object that implements actor critic, using a CNN (the nature CNN)
+
+    :param sess: (TensorFlow session) The current TensorFlow session
+    :param ob_space: (Gym Space) The observation space of the environment
+    :param ac_space: (Gym Space) The action space of the environment
+    :param n_env: (int) The number of environments to run
+    :param n_steps: (int) The number of steps to run for each environment
+    :param n_batch: (int) The number of batch to run (n_envs * n_steps)
+    :param reuse: (bool) If the policy is reusable or not
+    :param _kwargs: (dict) Extra keyword arguments for the nature CNN feature extraction
+    """
+
+    def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
+                 act_fun=tf.tanh, cnn_extractor=nature_cnn, feature_extraction=None, **kwargs):
+        super(NavigationMlpPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, n_lstm=256,
+                                                reuse=reuse, net_arch=[256], act_fun=tf.nn.sigmoid, feature_extraction= "none", **kwargs)
 
 
 class CnnPolicy(FeedForwardPolicy):

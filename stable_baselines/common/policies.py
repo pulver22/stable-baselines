@@ -42,13 +42,13 @@ def navigation_cnn(observation, **kwargs):
     # navigation_info = scalar[:, 0:6, :]  # QUATERNION: Only the first five values are important (distance (1) and bearing(4))
     navigation_info = navigation_info[:, :, 0]  # Reshape in order to concatenate the arrays
     # TODO: navigation_info needs to be normalized in [0,1] like the scaled images
-    navigation_info = navigation_info * 255  / 3.14 # Denormalize the vector multiplying by ob_space.high and normalise on the bearing.high (3.14)
+    # navigation_info = navigation_info * 255  / 3.14 # Denormalize the vector multiplying by ob_space.high and normalise on the bearing.high (3.14)
 
 
     activ = tf.nn.relu
     layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
     layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
-    layer_3 = tf.nn.sigmoid(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs)) # To squeeze values in [0,1]
+    layer_3 = tf.nn.relu(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs)) # To squeeze values in [0,1]
     layer_3 = conv_to_fc(layer_3)
     #layer_3 = tf.nn.sigmoid(layer_3)  # To squeeze values in [0,1]
     #print("L3: ", np.shape(layer_3))
@@ -59,7 +59,7 @@ def navigation_cnn(observation, **kwargs):
     #layer_3 = tf.nn.sigmoid(layer_3)  # To squeeze values in [0,1]
     #layer_3 = tf.concat([layer_3, navigation_info], axis=1)
     #return activ(layer_3)
-    return activ(linear(layer_3, 'fc2', n_hidden=512, init_scale=np.sqrt(2)))
+    return activ(linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2)))
 
 
 def mlp_extractor(flat_observations, net_arch, act_fun):

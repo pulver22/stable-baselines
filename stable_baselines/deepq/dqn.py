@@ -52,11 +52,11 @@ class DQN(OffPolicyRLModel):
                  learning_starts=1000, target_network_update_freq=500, prioritized_replay=False,
                  prioritized_replay_alpha=0.6, prioritized_replay_beta0=0.4, prioritized_replay_beta_iters=None,
                  prioritized_replay_eps=1e-6, param_noise=False, verbose=0, tensorboard_log=None,
-                 _init_setup_model=True):
+                 _init_setup_model=True, policy_kwargs=None):
 
         # TODO: replay_buffer refactoring
         super(DQN, self).__init__(policy=policy, env=env, replay_buffer=None, verbose=verbose, policy_base=DQNPolicy,
-                                  requires_vec_env=False)
+                                  requires_vec_env=False, policy_kwargs=policy_kwargs)
 
         self.checkpoint_path = checkpoint_path
         self.param_noise = param_noise
@@ -115,7 +115,7 @@ class DQN(OffPolicyRLModel):
                 optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
 
                 self.act, self._train_step, self.update_target, self.step_model = deepq.build_train(
-                    q_func=self.policy,
+                    q_func=partial(self.policy, **self.policy_kwargs),
                     ob_space=self.observation_space,
                     ac_space=self.action_space,
                     optimizer=optimizer,
@@ -268,12 +268,21 @@ class DQN(OffPolicyRLModel):
 
         return actions, None
 
-    def action_probability(self, observation, state=None, mask=None):
+    def action_probability(self, observation, state=None, mask=None, actions=None):
         observation = np.array(observation)
         vectorized_env = self._is_vectorized_observation(observation, self.observation_space)
 
         observation = observation.reshape((-1,) + self.observation_space.shape)
         actions_proba = self.proba_step(observation, state, mask)
+
+        if actions is not None:  # comparing the action distribution, to given actions
+            actions = np.array([actions])
+            assert isinstance(self.action_space, gym.spaces.Discrete)
+            actions = actions.reshape((-1,))
+            assert observation.shape[0] == actions.shape[0], "Error: batch sizes differ for actions and observations."
+            actions_proba = actions_proba[np.arange(actions.shape[0]), actions]
+            # normalize action proba shape
+            actions_proba = actions_proba.reshape((-1, 1))
 
         if not vectorized_env:
             if state is not None:
@@ -306,7 +315,8 @@ class DQN(OffPolicyRLModel):
             "action_space": self.action_space,
             "policy": self.policy,
             "n_envs": self.n_envs,
-            "_vectorize_action": self._vectorize_action
+            "_vectorize_action": self._vectorize_action,
+            "policy_kwargs": self.policy_kwargs
         }
 
         params = self.sess.run(self.params)
@@ -316,6 +326,11 @@ class DQN(OffPolicyRLModel):
     @classmethod
     def load(cls, load_path, env=None, **kwargs):
         data, params = cls._load_from_file(load_path)
+
+        if 'policy_kwargs' in kwargs and kwargs['policy_kwargs'] != data['policy_kwargs']:
+            raise ValueError("The specified policy kwargs do not equal the stored policy kwargs. "
+                             "Stored kwargs: {}, specified kwargs: {}".format(data['policy_kwargs'],
+                                                                              kwargs['policy_kwargs']))
 
         model = cls(policy=data["policy"], env=env, _init_setup_model=False)
         model.__dict__.update(data)

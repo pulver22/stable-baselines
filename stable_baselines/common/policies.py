@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 from gym.spaces import Discrete
 
-from stable_baselines.a2c.utils import conv, linear, conv_to_fc, batch_to_seq, seq_to_batch, lstm
+from stable_baselines.a2c.utils import conv, linear, conv_to_fc, batch_to_seq, seq_to_batch, lstm, norm_layer
 from stable_baselines.common.distributions import make_proba_dist_type, CategoricalProbabilityDistribution, \
     MultiCategoricalProbabilityDistribution, DiagGaussianProbabilityDistribution, BernoulliProbabilityDistribution
 from stable_baselines.common.input import observation_input
@@ -39,7 +39,7 @@ def navigation_cnn(observation, **kwargs):
     # np.shape(observation) = (1,84,85,1)
     scaled_images = observation[:, :, 0:-1, :]
     scalar = observation[:, :, -1, :]
-    navigation_info = scalar[:, 0:2, :]  # EULER: Only the first two values are important (distance and bearing(yaw))
+    navigation_info = scalar[:, 0:3, :]  # EULER: Only the first two values are important (distance and bearing(yaw))
     # navigation_info = scalar[:, 0:6, :]  # QUATERNION: Only the first five values are important (distance (1) and bearing(4))
     navigation_info = navigation_info[:, :, 0]  # Reshape in order to concatenate the arrays
     # TODO: navigation_info needs to be normalized in [0,1] like the scaled images
@@ -47,20 +47,23 @@ def navigation_cnn(observation, **kwargs):
 
 
     activ = tf.nn.relu
-    layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
-    layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
-    layer_3 = tf.nn.relu(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs)) # To squeeze values in [0,1]
+    layer_1 = norm_layer(activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs)), 'c1_norm')
+    layer_2 = norm_layer(activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs)), 'c2_norm')
+    layer_3 = norm_layer(activ(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs)), 'c3_norm')
+    # layer_1 = activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs))
+    # layer_2 = activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs))
+    # layer_3 = activ(conv(layer_2, 'c3', n_filters=64, filter_size=3, stride=1, init_scale=np.sqrt(2), **kwargs))
     layer_3 = conv_to_fc(layer_3)
     #layer_3 = tf.nn.sigmoid(layer_3)  # To squeeze values in [0,1]
     #print("L3: ", np.shape(layer_3))
     #print("NI: ", np.shape(navigation_info))
-    layer_3 = tf.concat([layer_3, navigation_info], axis=1)
+    fc_1 = tf.concat([layer_3, navigation_info], axis=1)
     #print("L3: ", np.shape(layer_3))
     #layer_3 = linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2))
     #layer_3 = tf.nn.sigmoid(layer_3)  # To squeeze values in [0,1]
     #layer_3 = tf.concat([layer_3, navigation_info], axis=1)
     #return activ(layer_3)
-    return activ(linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2)))
+    return layer_3, tf.nn.relu(linear(fc_1, 'fc1', n_hidden=512, init_scale=np.sqrt(2)))
 
 
 def mlp_extractor(flat_observations, net_arch, act_fun):
@@ -466,7 +469,8 @@ class FeedForwardPolicy(ActorCriticPolicy):
 
         with tf.variable_scope("model", reuse=reuse):
             if feature_extraction == "cnn":
-                pi_latent = vf_latent = cnn_extractor(self.processed_obs, **kwargs)
+                kernel, pi_latent = kernel, vf_latent = cnn_extractor(self.processed_obs, **kwargs)
+                self.kernel = kernel
             # elif feature_extraction == "navigation_cnn":
             #     pi_latent = vf_latent = navigation_cnn(self.processed_obs, **kwargs)
             else:
@@ -482,12 +486,12 @@ class FeedForwardPolicy(ActorCriticPolicy):
 
     def step(self, obs, state=None, mask=None, deterministic=False):
         if deterministic:
-            action, value, neglogp = self.sess.run([self.deterministic_action, self._value, self.neglogp],
+            kernel, action, value, neglogp = self.sess.run([self.kernel, self.deterministic_action, self._value, self.neglogp],
                                                    {self.obs_ph: obs})
         else:
-            action, value, neglogp = self.sess.run([self.action, self._value, self.neglogp],
+            kernel, action, value, neglogp = self.sess.run([self.kernel, self.action, self._value, self.neglogp],
                                                    {self.obs_ph: obs})
-        return action, value, self.initial_state, neglogp
+        return kernel, action, value, self.initial_state, neglogp
 
     def proba_step(self, obs, state=None, mask=None):
         return self.sess.run(self.policy_proba, {self.obs_ph: obs})
@@ -512,7 +516,7 @@ class NavigationMlpPolicy(FeedForwardPolicy):
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, layers=None, net_arch=None,
                  act_fun=tf.tanh, cnn_extractor=nature_cnn, feature_extraction=None, **kwargs):
         super(NavigationMlpPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, n_lstm=256,
-                                                reuse=reuse, net_arch=[256], act_fun=tf.nn.sigmoid, feature_extraction= "none", **kwargs)
+                                                reuse=reuse, net_arch=[256], act_fun=tf.nn.relu, feature_extraction= "none", **kwargs)
 
 
 class CnnPolicy(FeedForwardPolicy):

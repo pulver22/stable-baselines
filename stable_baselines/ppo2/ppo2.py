@@ -11,7 +11,7 @@ from stable_baselines import logger
 from stable_baselines.common import explained_variance, ActorCriticRLModel, tf_util, SetVerbosity, TensorboardWriter
 from stable_baselines.common.runners import AbstractEnvRunner
 from stable_baselines.common.policies import LstmPolicy, ActorCriticPolicy
-from stable_baselines.a2c.utils import total_episode_reward_logger
+from stable_baselines.a2c.utils import EpisodeStats, total_episode_reward_logger
 
 
 class PPO2(ActorCriticRLModel):
@@ -124,6 +124,8 @@ class PPO2(ActorCriticRLModel):
                                               self.n_envs // self.nminibatches, self.n_steps, n_batch_train,
                                               reuse=True, **self.policy_kwargs)
 
+
+                # with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):  # Required by batch norm
                 with tf.variable_scope("loss", reuse=False):
                     self.action_ph = train_model.pdtype.sample_placeholder([None], name="action_ph")
                     self.advs_ph = tf.placeholder(tf.float32, [None], name="advs_ph")
@@ -168,7 +170,17 @@ class PPO2(ActorCriticRLModel):
                         grads, _grad_norm = tf.clip_by_global_norm(grads, self.max_grad_norm)
                     grads = list(zip(grads, self.params))
                 trainer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
+
+                # with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):  # Required by batch norm
                 self._train = trainer.apply_gradients(grads)
+
+
+                ##########################################
+                ##         BATCH NORMALIZATION          ##
+                ##########################################
+                # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                # with tf.control_dependencies(update_ops):
+                #     train_op = trainer.minimize(loss)
 
                 self.loss_names = ['policy_loss', 'value_loss', 'policy_entropy', 'approxkl', 'clipfrac']
 
@@ -267,6 +279,8 @@ class PPO2(ActorCriticRLModel):
                 as writer:
             self._setup_learn(seed)
 
+            episode_stats = EpisodeStats(self.n_steps, self.n_envs)
+
             runner = Runner(env=self.env, model=self, n_steps=self.n_steps, gamma=self.gamma, lam=self.lam)
             self.episode_reward = np.zeros((self.n_envs,))
 
@@ -283,6 +297,7 @@ class PPO2(ActorCriticRLModel):
                 cliprangenow = self.cliprange(frac)
                 # true_reward is the reward without discount
                 obs, returns, masks, actions, values, neglogpacs, states, ep_infos, true_reward = runner.run()
+                episode_stats.feed(true_reward, masks)
                 ep_info_buf.extend(ep_infos)
                 mb_loss_vals = []
                 if states is None:  # nonrecurrent version
@@ -336,8 +351,10 @@ class PPO2(ActorCriticRLModel):
                     logger.logkv("total_timesteps", self.num_timesteps)
                     logger.logkv("fps", fps)
                     logger.logkv("explained_variance", float(explained_var))
-                    logger.logkv('ep_rewmean', safe_mean([ep_info['r'] for ep_info in ep_info_buf]))
-                    logger.logkv('eplenmean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))
+                    # logger.logkv('ep_rewmean', safe_mean([ep_info['r'] for ep_info in ep_info_buf]))
+                    # logger.logkv('eplenmean', safe_mean([ep_info['l'] for ep_info in ep_info_buf]))
+                    logger.logkv("mean_episode_length", episode_stats.mean_length())
+                    logger.logkv("mean_episode_reward", episode_stats.mean_reward())
                     logger.logkv('time_elapsed', t_start - t_first_start)
                     for (loss_val, loss_name) in zip(loss_vals, self.loss_names):
                         logger.logkv(loss_name, loss_val)
@@ -411,7 +428,8 @@ class Runner(AbstractEnvRunner):
         mb_states = self.states
         ep_infos = []
         for _ in range(self.n_steps):
-            actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
+            kernel, actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
+            print("Kernel_min: {}, Kernel_max: {}", np.min(kernel), np.max(kernel))
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
             mb_values.append(values)

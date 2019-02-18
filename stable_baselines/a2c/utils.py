@@ -129,6 +129,18 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
         return bias + tf.nn.conv2d(input_tensor, weight, strides=strides, padding=pad, data_format=data_format)
 
 
+def norm_layer(input_tensor, scope, is_train=True):
+    """
+    Perform batch normalization on a layer
+
+    :param input_tensor: (TensorFlow Tensor) The input tensor for the normalization
+    :return: (Tensorflow Tensor) The normalized tensor
+    """
+    with tf.variable_scope(scope):
+        return tf.layers.batch_normalization(input_tensor, training=is_train)
+
+
+
 def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0):
     """
     Creates a fully connected layer for TensorFlow

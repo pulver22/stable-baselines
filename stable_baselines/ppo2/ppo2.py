@@ -11,7 +11,7 @@ from stable_baselines import logger
 from stable_baselines.common import explained_variance, ActorCriticRLModel, tf_util, SetVerbosity, TensorboardWriter
 from stable_baselines.common.runners import AbstractEnvRunner
 from stable_baselines.common.policies import LstmPolicy, ActorCriticPolicy
-from stable_baselines.a2c.utils import EpisodeStats, total_episode_reward_logger
+from stable_baselines.a2c.utils import EpisodeStats, total_episode_reward_logger, get_bn_vars
 
 
 class PPO2(ActorCriticRLModel):
@@ -125,7 +125,6 @@ class PPO2(ActorCriticRLModel):
                                               reuse=True, **self.policy_kwargs)
 
 
-                # with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):  # Required by batch norm
                 with tf.variable_scope("loss", reuse=False):
                     self.action_ph = train_model.pdtype.sample_placeholder([None], name="action_ph")
                     self.advs_ph = tf.placeholder(tf.float32, [None], name="advs_ph")
@@ -170,17 +169,10 @@ class PPO2(ActorCriticRLModel):
                         grads, _grad_norm = tf.clip_by_global_norm(grads, self.max_grad_norm)
                     grads = list(zip(grads, self.params))
                 trainer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph, epsilon=1e-5)
-
-                # with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):  # Required by batch norm
                 self._train = trainer.apply_gradients(grads)
 
+                self.mean, self.variance = get_bn_vars(tf.global_variables())
 
-                ##########################################
-                ##         BATCH NORMALIZATION          ##
-                ##########################################
-                # update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                # with tf.control_dependencies(update_ops):
-                #     train_op = trainer.minimize(loss)
 
                 self.loss_names = ['policy_loss', 'value_loss', 'policy_entropy', 'approxkl', 'clipfrac']
 
@@ -200,7 +192,18 @@ class PPO2(ActorCriticRLModel):
                         tf.summary.histogram('old_neglog_action_probabilty', self.old_neglog_pac_ph)
                         tf.summary.histogram('old_value_pred', self.old_vpred_ph)
                         if tf_util.is_image(self.observation_space):
-                            tf.summary.image('observation', train_model.obs_ph)
+                            # print("[shape]observation_space: ", np.shape(train_model.obs_ph))
+                            # print("[shape]single_image", np.shape(train_model.obs_ph[:,:,:,0]))
+                            # train_model.obs_ph = tf.reshape(train_model.obs_ph, shape=[-1, 84,85,4])
+                            n_channels = np.shape(train_model.obs_ph)[3]
+                            # print("Channels: ", n_channels)
+                            if n_channels > 0:
+                                tf.summary.image('observation', tf.reshape(tensor=train_model.obs_ph[:,:,:,0], shape=(-1, 84, 85,1)))
+                            else:
+                                tf.summary.image('observation', train_model.obs_ph)
+                            # tf.summary.image('observation1', tf.reshape(tensor=train_model.obs_ph[:,:,:,1], shape=(-1, 84, 85,1)), max_outputs=1)
+                            # tf.summary.image('observation2', tf.reshape(tensor=train_model.obs_ph[:,:,:,2], shape=(-1, 84, 85,1)), max_outputs=1)
+                            # tf.summary.image('observation3', tf.reshape(tensor=train_model.obs_ph[:,:,:,3], shape= (-1, 84, 85,1)), max_outputs=1)
                         else:
                             tf.summary.histogram('observation', train_model.obs_ph)
 
@@ -256,6 +259,7 @@ class PPO2(ActorCriticRLModel):
                     [self.summary, self.pg_loss, self.vf_loss, self.entropy, self.approxkl, self.clipfrac, self._train],
                     td_map, options=run_options, run_metadata=run_metadata)
                 writer.add_run_metadata(run_metadata, 'step%d' % (update * update_fac))
+                # print("[mean, variance]: ", self.sess.run([self.mean, self.variance]))
             else:
                 summary, policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _ = self.sess.run(
                     [self.summary, self.pg_loss, self.vf_loss, self.entropy, self.approxkl, self.clipfrac, self._train],
@@ -264,7 +268,7 @@ class PPO2(ActorCriticRLModel):
         else:
             policy_loss, value_loss, policy_entropy, approxkl, clipfrac, _ = self.sess.run(
                 [self.pg_loss, self.vf_loss, self.entropy, self.approxkl, self.clipfrac, self._train], td_map)
-
+            # print("[mean, variance]: ", self.sess.run([self.mean, self.variance]))
         return policy_loss, value_loss, policy_entropy, approxkl, clipfrac
 
     def learn(self, total_timesteps, callback=None, seed=None, log_interval=1, tb_log_name="PPO2",

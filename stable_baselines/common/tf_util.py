@@ -99,7 +99,7 @@ def make_session(num_cpu=None, make_default=False, graph=None):
         allow_soft_placement=True,
         inter_op_parallelism_threads=num_cpu,
         intra_op_parallelism_threads=num_cpu,
-        log_device_placement=True)
+        log_device_placement=False)
     # Prevent tensorflow from taking all the gpu memory
     tf_config.gpu_options.allow_growth = True
     if make_default:

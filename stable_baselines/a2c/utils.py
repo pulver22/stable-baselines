@@ -119,8 +119,11 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
     else:
         raise NotImplementedError
     bias_var_shape = [n_filters] if one_dim_bias else [1, n_filters, 1, 1]
+    print(" Channel: ", channel_ax)
     n_input = input_tensor.get_shape()[channel_ax].value
+    print(" Input: ", n_input)
     wshape = [filter_size, filter_size, n_input, n_filters]
+    print(" Wshape: ", wshape)
     with tf.variable_scope(scope):
         weight = tf.get_variable("w", wshape, initializer=ortho_init(init_scale))
         bias = tf.get_variable("b", bias_var_shape, initializer=tf.constant_initializer(0.0))
@@ -129,7 +132,7 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
         return bias + tf.nn.conv2d(input_tensor, weight, strides=strides, padding=pad, data_format=data_format)
 
 
-def norm_layer(input_tensor, scope, is_train=True):
+def norm_layer(input_tensor, scope, is_training=True, trainable=True, momentum=0.99, name="BatchNorm"):
     """
     Perform batch normalization on a layer
 
@@ -137,9 +140,21 @@ def norm_layer(input_tensor, scope, is_train=True):
     :return: (Tensorflow Tensor) The normalized tensor
     """
     with tf.variable_scope(scope):
-        return tf.layers.batch_normalization(input_tensor, training=is_train)
+        return tf.layers.batch_normalization(input_tensor, training=is_training)
+        # return  tf.keras.layers.BatchNormalization(epsilon=1E-5, center=True, scale=True, momentum=momentum, trainable=trainable, name=name)(input_tensor)
+        # add_elements_to_collection(layer.updates, tf.GraphKeys.UPDATE_OPS)
+        # return layer.apply(input_tensor, training=is_training)
 
 
+def add_elements_to_collection(elements, collection_list):
+    elements = tf.nest.flatten(elements)
+    collection_list = tf.nest.flatten(collection_list)
+    for name in collection_list:
+       collection = tf.get_collection_ref(name)
+       collection_set = set(collection)
+       for element in elements:
+           if element not in collection_set:
+                collection.append(element)
 
 def linear(input_tensor, scope, n_hidden, *, init_scale=1.0, init_bias=0.0):
     """
@@ -600,3 +615,17 @@ def total_episode_reward_logger(rew_acc, rewards, masks, writer, steps):
                 rew_acc[env_idx] = sum(rewards[env_idx, dones_idx[-1, 0]:])
 
     return rew_acc
+
+
+def get_bn_vars(collection):
+    moving_mean, moving_variance = None, None
+    for var in collection:
+        name = var.name.lower()
+        if "variance" in name:
+            moving_variance = var
+        if "mean" in name:
+            moving_mean = var
+
+    if moving_mean is not None and moving_variance is not None:
+        return moving_mean, moving_variance
+    raise ValueError("Unable to find moving mean and variance")

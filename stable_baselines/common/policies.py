@@ -39,17 +39,19 @@ def navigation_cnn(observation, **kwargs):
     # np.shape(observation) = (1,84,85,1)
     print("Shape observation: ", np.shape(observation))
     scaled_images = observation[:, :, 0:-1, :]
+    # With LIDAR
     scalar = observation[:, :, -1, :]
-    navigation_info = scalar[:, 0:3, :]  # EULER: Only the first two values are important (distance and bearing(yaw))
-    # navigation_info = scalar[:, 0:6, :]  # QUATERNION: Only the first five values are important (distance (1) and bearing(4))
-    navigation_info = navigation_info[:, :, 0]  # Reshape in order to concatenate the arrays
+    navigation_info = scalar[:, :, 0]  # Reshape in order to concatenate the arrays
+    # WITHOUT LIDAR
+    # navigation_info = scalar[:, 0:3, :]  # Uncomment if you don't want use the lidar
+    # navigation_info = navigation_info[:, :, 0]  # Reshape in order to concatenate the arrays
     # TODO: navigation_info needs to be normalized in [0,1] like the scaled images
     # navigation_info = navigation_info * 255  / 3.14 # Denormalize the vector multiplying by ob_space.high and normalise on the bearing.high (3.14)
     print("Scaled images: ", np.shape(scaled_images))
     print("Scalar: ", np.shape(scalar))
     print("NavigationInfo: ", np.shape(navigation_info))
 
-    activ = tf.nn.leaky_relu
+    activ = tf.nn.elu
     layer_1 = norm_layer(activ(conv(scaled_images, 'c1', n_filters=32, filter_size=8, stride=4, init_scale=np.sqrt(2), **kwargs)), 'c1_norm')
     print("Layer1: ", np.shape(layer_1))
     layer_2 = norm_layer(activ(conv(layer_1, 'c2', n_filters=64, filter_size=4, stride=2, init_scale=np.sqrt(2), **kwargs)), 'c2_norm')
@@ -69,10 +71,6 @@ def navigation_cnn(observation, **kwargs):
     #print("NI: ", np.shape(navigation_info))
     fc_1 = tf.concat([layer_3, navigation_info], axis=1)
     #print("L3: ", np.shape(layer_3))
-    #layer_3 = linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2))
-    #layer_3 = tf.nn.sigmoid(layer_3)  # To squeeze values in [0,1]
-    #layer_3 = tf.concat([layer_3, navigation_info], axis=1)
-    #return activ(layer_3)
     # filter_summaries = tf.summary.merge([tf.summary.image("raw_observation", scaled_images, max_outputs=32),
     #                                           tf.summary.image("filters/conv1", layer_1,
     #                                                            max_outputs=32)])
@@ -332,7 +330,7 @@ class LstmPolicy(ActorCriticPolicy):
             self.masks_ph = tf.placeholder(tf.float32, [n_batch], name="masks_ph")  # mask (done t-1)
             # n_lstm * 2 dim because of the cell and hidden states of the LSTM
             self.states_ph = tf.placeholder(tf.float32, [self.n_env, n_lstm * 2], name="states_ph")  # states
-
+        print("net_arch: ", net_arch)
         if net_arch is None:  # Legacy mode
             if layers is None:
                 layers = [64, 64]
@@ -341,17 +339,23 @@ class LstmPolicy(ActorCriticPolicy):
 
             with tf.variable_scope("model", reuse=reuse):
                 if feature_extraction == "cnn":
-                    extracted_features = cnn_extractor(self.processed_obs, **kwargs)
+                    kernel, extracted_features = cnn_extractor(self.processed_obs, **kwargs)
+                    self.kernel = kernel
                 else:
                     extracted_features = tf.layers.flatten(self.processed_obs)
                     for i, layer_size in enumerate(layers):
                         extracted_features = act_fun(linear(extracted_features, 'pi_fc' + str(i), n_hidden=layer_size,
                                                             init_scale=np.sqrt(2)))
+
+                print("extracted_features: ", extracted_features)
                 input_sequence = batch_to_seq(extracted_features, self.n_env, n_steps)
+                print("input_sequence: ", input_sequence)
                 masks = batch_to_seq(self.masks_ph, self.n_env, n_steps)
                 rnn_output, self.snew = lstm(input_sequence, masks, self.states_ph, 'lstm1', n_hidden=n_lstm,
                                              layer_norm=layer_norm)
+                print("rnn_output: ", rnn_output)
                 rnn_output = seq_to_batch(rnn_output)
+                print("rnn_output: ", rnn_output)
                 value_fn = linear(rnn_output, 'vf', 1)
 
                 self.proba_distribution, self.policy, self.q_value = \
@@ -428,10 +432,10 @@ class LstmPolicy(ActorCriticPolicy):
 
     def step(self, obs, state=None, mask=None, deterministic=False):
         if deterministic:
-            return self.sess.run([self.deterministic_action, self._value, self.snew, self.neglogp],
+            return self.sess.run([self.kernel, self.deterministic_action, self._value, self.snew, self.neglogp],
                                  {self.obs_ph: obs, self.states_ph: state, self.masks_ph: mask})
         else:
-            return self.sess.run([self.action, self._value, self.snew, self.neglogp],
+            return self.sess.run([self.kernel, self.action, self._value, self.snew, self.neglogp],
                                  {self.obs_ph: obs, self.states_ph: state, self.masks_ph: mask})
 
     def proba_step(self, obs, state=None, mask=None):
@@ -553,7 +557,7 @@ class CnnPolicy(FeedForwardPolicy):
 
 class NavigationCnnPolicy(FeedForwardPolicy):
     """
-    Policy object that implements actor critic, using a CNN (the nature CNN)
+    Policy object that implements actor critic, using a CNN (the navigation CNN)
 
     :param sess: (TensorFlow session) The current TensorFlow session
     :param ob_space: (Gym Space) The observation space of the environment
@@ -568,6 +572,25 @@ class NavigationCnnPolicy(FeedForwardPolicy):
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, **_kwargs):
         super(NavigationCnnPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse,
                                         cnn_extractor=navigation_cnn, feature_extraction="cnn", **_kwargs)
+
+class NavigationCnnLstmPolicy(LstmPolicy):
+    """
+    Policy object that implements actor critic, using LSTMs with a CNN feature extraction (the navigation CNN)
+
+    :param sess: (TensorFlow session) The current TensorFlow session
+    :param ob_space: (Gym Space) The observation space of the environment
+    :param ac_space: (Gym Space) The action space of the environment
+    :param n_env: (int) The number of environments to run
+    :param n_steps: (int) The number of steps to run for each environment
+    :param n_batch: (int) The number of batch to run (n_envs * n_steps)
+    :param n_lstm: (int) The number of LSTM cells (for recurrent policies)
+    :param reuse: (bool) If the policy is reusable or not
+    :param _kwargs: (dict) Extra keyword arguments for the nature CNN feature extraction
+    """
+
+    def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, n_lstm=256, reuse=False, **_kwargs):
+        super(NavigationCnnLstmPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, n_lstm, reuse,
+                                        layer_norm=False, cnn_extractor=navigation_cnn, feature_extraction="cnn", **_kwargs)
 
 class CnnLstmPolicy(LstmPolicy):
     """

@@ -111,6 +111,7 @@ class PPO2(ActorCriticRLModel):
                 n_batch_step = None
                 n_batch_train = None
                 if issubclass(self.policy, LstmPolicy):
+                    print("n_envs: {}, nminibatches: {}".format(self.n_envs, self.nminibatches))
                     assert self.n_envs % self.nminibatches == 0, "For recurrent policies, "\
                         "the number of environments run in parallel should be a multiple of nminibatches."
                     n_batch_step = self.n_envs
@@ -198,7 +199,11 @@ class PPO2(ActorCriticRLModel):
                             n_channels = np.shape(train_model.obs_ph)[3]
                             # print("Channels: ", n_channels)
                             if n_channels > 0:
-                                tf.summary.image('observation', tf.reshape(tensor=train_model.obs_ph[:,:,:,0], shape=(-1, 84, 85,1)))
+                                obs = tf.reshape(tensor=train_model.obs_ph[:, :, :, 0], shape=(-1, self.env.observation_space.shape[0], self.env.observation_space.shape[1], 1))
+                                obs = tf.cast(obs * (255 - 0) + 0, dtype=tf.uint8)
+                                tf.summary.image('observation',obs)
+
+
                             else:
                                 tf.summary.image('observation', train_model.obs_ph)
                             # tf.summary.image('observation1', tf.reshape(tensor=train_model.obs_ph[:,:,:,1], shape=(-1, 84, 85,1)), max_outputs=1)
@@ -433,7 +438,8 @@ class Runner(AbstractEnvRunner):
         ep_infos = []
         for _ in range(self.n_steps):
             kernel, actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)
-            print("Kernel_min: {}, Kernel_max: {}", np.min(kernel), np.max(kernel))
+            # print("Kernel_min: {}, Kernel_max: {}", np.min(kernel), np.max(kernel))
+            # print("Time: ", time.time()%60 )
             mb_obs.append(self.obs.copy())
             mb_actions.append(actions)
             mb_values.append(values)

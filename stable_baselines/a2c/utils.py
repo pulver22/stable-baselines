@@ -102,7 +102,8 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
     :param input_tensor: (TensorFlow Tensor) The input tensor for the convolution
     :param scope: (str) The TensorFlow variable scope
     :param n_filters: (int) The number of filters
-    :param filter_size: (int) The filter size
+    :param filter_size:  (Union[int, [int], tuple<int, int>]) The filter size for the squared kernel matrix,
+    or the height and width of kernel filter if the input is a list or tuple
     :param stride: (int) The stride of the convolution
     :param pad: (str) The padding type ('VALID' or 'SAME')
     :param init_scale: (int) The initialization scale
@@ -110,6 +111,14 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
     :param one_dim_bias: (bool) If the bias should be one dimentional or not
     :return: (TensorFlow Tensor) 2d convolutional layer
     """
+    if isinstance(filter_size, list) or isinstance(filter_size, tuple):
+        assert len(filter_size) == 2, \
+            "Filter size must have 2 elements (height, width), {} were given".format(len(filter_size))
+        filter_height = filter_size[0]
+        filter_width = filter_size[1]
+    else:
+        filter_height = filter_size
+        filter_width = filter_size
     if data_format == 'NHWC':
         channel_ax = 3
         strides = [1, stride, stride, 1]
@@ -123,8 +132,8 @@ def conv(input_tensor, scope, *, n_filters, filter_size, stride,
     bias_var_shape = [n_filters] if one_dim_bias else [1, n_filters, 1, 1]
     print(" Channel: ", channel_ax)
     n_input = input_tensor.get_shape()[channel_ax].value
+    wshape = [filter_height, filter_width, n_input, n_filters]
     print(" Input: ", n_input)
-    wshape = [filter_size, filter_size, n_input, n_filters]
     print(" Wshape: ", wshape)
     with tf.variable_scope(scope):
         weight = tf.get_variable("w", wshape, initializer=ortho_init(init_scale))

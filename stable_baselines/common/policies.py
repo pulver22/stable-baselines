@@ -41,10 +41,10 @@ def navigation_cnn(observation, **kwargs):
     scaled_images = observation[:, :, 0:-1, :]
     # With LIDAR
     scalar = observation[:, :, -1, :]
-    navigation_info = scalar[:, :, 0]  # Reshape in order to concatenate the arrays
+    # navigation_info = scalar[:, :, 0]  # Reshape in order to concatenate the arrays
     # WITHOUT LIDAR
-    # navigation_info = scalar[:, 0:3, :]  # Uncomment if you don't want use the lidar
-    # navigation_info = navigation_info[:, :, 0]  # Reshape in order to concatenate the arrays
+    navigation_info = scalar[:, 0:3, :]  # Uncomment if you don't want use the lidar
+    navigation_info = navigation_info[:, :, 0]  # Reshape in order to concatenate the arrays
     # TODO: navigation_info needs to be normalized in [0,1] like the scaled images
     # navigation_info = navigation_info * 255  / 3.14 # Denormalize the vector multiplying by ob_space.high and normalise on the bearing.high (3.14)
     print("Scaled images: ", np.shape(scaled_images))
@@ -627,10 +627,10 @@ class FeedForwardPolicy(ActorCriticPolicy):
 
     def step(self, obs, state=None, mask=None, deterministic=False):
         if deterministic:
-            action, value, neglogp = self.sess.run([self.deterministic_action, self.value_flat, self.neglogp],
+            kernel, action, value, neglogp = self.sess.run([self.kernel, self.deterministic_action, self.value_flat, self.neglogp],
                                                    {self.obs_ph: obs})
         else:
-            action, value, neglogp = self.sess.run([self.action, self.value_flat, self.neglogp],
+            kernel, action, value, neglogp = self.sess.run([self.kernel, self.action, self.value_flat, self.neglogp],
                                                    {self.obs_ph: obs})
         return kernel, action, value, self.initial_state, neglogp
 

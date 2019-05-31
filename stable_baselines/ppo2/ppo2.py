@@ -11,7 +11,7 @@ from stable_baselines import logger
 from stable_baselines.common import explained_variance, ActorCriticRLModel, tf_util, SetVerbosity, TensorboardWriter
 from stable_baselines.common.runners import AbstractEnvRunner
 from stable_baselines.common.policies import ActorCriticPolicy, RecurrentActorCriticPolicy
-from stable_baselines.a2c.utils import total_episode_reward_logger
+from stable_baselines.a2c.utils import total_episode_reward_logger, get_bn_vars, EpisodeStats
 
 
 class PPO2(ActorCriticRLModel):
@@ -199,7 +199,7 @@ class PPO2(ActorCriticRLModel):
                         tf.summary.histogram('old_neglog_action_probabilty', self.old_neglog_pac_ph)
                         tf.summary.histogram('old_value_pred', self.old_vpred_ph)
                         if tf_util.is_image(self.observation_space):
-                            # print("[shape]observation_space: ", np.shape(train_model.obs_ph))
+                            print("[shape]observation_space: ", np.shape(train_model.obs_ph))
                             # print("[shape]single_image", np.shape(train_model.obs_ph[:,:,:,0]))
                             # train_model.obs_ph = tf.reshape(train_model.obs_ph, shape=[-1, 84,85,4])
                             n_channels = np.shape(train_model.obs_ph)[3]
@@ -208,13 +208,14 @@ class PPO2(ActorCriticRLModel):
                                 obs = tf.reshape(tensor=train_model.obs_ph[:, :, :, 0], shape=(-1, self.env.observation_space.shape[0], self.env.observation_space.shape[1], 1))
                                 obs = tf.cast(obs * (255 - 0) + 0, dtype=tf.uint8)
                                 tf.summary.image('observation',obs)
-
-
-                            else:
-                                tf.summary.image('observation', train_model.obs_ph)
-                            # tf.summary.image('observation1', tf.reshape(tensor=train_model.obs_ph[:,:,:,1], shape=(-1, 84, 85,1)), max_outputs=1)
-                            # tf.summary.image('observation2', tf.reshape(tensor=train_model.obs_ph[:,:,:,2], shape=(-1, 84, 85,1)), max_outputs=1)
-                            # tf.summary.image('observation3', tf.reshape(tensor=train_model.obs_ph[:,:,:,3], shape= (-1, 84, 85,1)), max_outputs=1)
+                            #
+                            #
+                            # else:
+                            # train_model.obs_ph = tf.cast(train_model.obs_ph * (255 - 0) + 0, dtype=tf.uint8)
+                            # tf.summary.image('observation', train_model.obs_ph)
+                            # tf.summary.image('observation1', tf.reshape(tensor=train_model.obs_ph[:,:,:,0], shape=(-1, 84, 85,1)), max_outputs=1)
+                            # tf.summary.image('observation2', tf.reshape(tensor=train_model.obs_ph[:,:,:,1], shape=(-1, 84, 85,1)), max_outputs=1)
+                            # tf.summary.image('observation3', tf.reshape(tensor=train_model.obs_ph[:,:,:,2], shape= (-1, 84, 85,1)), max_outputs=1)
                         else:
                             tf.summary.histogram('observation', train_model.obs_ph)
 
